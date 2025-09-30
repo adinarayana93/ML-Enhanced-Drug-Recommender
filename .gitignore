@@ -1,0 +1,22 @@
+# virtual env
+venv/
+
+# python caches
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Data & models (don't commit large datasets or binary model files)
+data/
+saved_models/
+*.pkl
+*.joblib
+*.xlsx
+*.csv
+
+# OS files
+Thumbs.db
+.DS_Store
