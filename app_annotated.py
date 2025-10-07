@@ -53,6 +53,52 @@ def combine_symptom_inputs(symptom_inputs):
     tokens = [s.strip() for s in symptom_inputs if isinstance(s, str) and s.strip() != ""]
     return " ".join(tokens)
 
+
+def get_top_tokens_for_input(input_text, vectorizer, model, encoder, top_n=10):
+    """
+    Returns top_n tokens (word, score) that contributed for this input_text.
+    Approach:
+      - vectorize input -> counts for tokens present
+      - get feature importances from tree-based estimators inside VotingClassifier
+      - combine importances across estimators that have feature_importances_
+      - compute token_score = token_count * feature_importance
+      - return top tokens sorted by token_score
+    Note: This is a simple, intuitive approximation (not SHAP), but useful for demonstration.
+    """ 
+
+    vec = vectorizer.transform([input_text])
+    try:
+        features = vectorizer.get_feature_names_out()
+    except:
+        features = list(vectorizer.vocabulary_.keys())
+    
+    import numpy as np
+    fi_sum = np.zeros(len(features), dtype=float)
+    fi_count = 0
+    if hasattr(model, "estimators_"):
+        for est in model.estimators_:
+            if hasattr(est, "feature_importances_"):
+                fi = getattr(est, "feature_importance_")
+                if len(fi) == len(fi_sum):
+                    fi_sum += fi
+                    fi_count += 1
+
+    if fi_count == 0:
+        return []
+    
+    fi_avg = fi_sum / fi_count
+    nz = vec.nonzero()[1]
+    token_scores = []
+    for idx in nz:
+        token = features[idx]
+        count = vec[0, idx]
+        score = float(count) * float(fi_avg[idx])
+        token_scores.append((token, score, int(count)))
+
+    token_scores.sort(key=lambda x: x[1], reverse=True)
+    return token_scores[:top_n]
+
+
 def lookup_recommendations(predicted_label, df):
 
     row = df[df["Disease"] == predicted_label]
@@ -133,10 +179,25 @@ with tab1:
             else:
                 st.info("No recommendation found in the database for this disease.")
 
+                        # --- Explainability: show top tokens ---
+            token_info = get_top_tokens_for_input(combined_input, vectorizer, model, encoder, top_n=10)
+            if token_info:
+                st.markdown("#### Top contributing tokens (approx.)")
+                # token_info is list of (token, score, count)
+                for token, score, count in token_info:
+                    st.write(f"- **{token}** (count={count}) — importance score: {score:.5f}")
+            else:
+                st.info("Token-level explainability not available for this model.")
+
+            if len(name.strip()) == 0:
+                name_to_save = "Anonymous"
+            else:
+                name_to_save = name.strip()
+
             record = {
                 "datetime": datetime.now().isoformat(),
-                "name": name,
-                "age": age,
+                "name": name_to_save,
+                "age": int(age),
                 "sex": sex,
                 "contact": contact,
                 "combined_symptoms": combined_input,
@@ -152,8 +213,20 @@ with tab2:
         pr_df = pd.read_csv(PATIENT_RECORDS)
         st.dataframe(pr_df.tail(50))
 
+                # Provide CSV download
         csv = pr_df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download CSV", data=csv, file_name= "patient_records.csv", mime="text/csv")
+        st.download_button("Download CSV", data=csv, file_name="patient_records.csv", mime="text/csv")
+
+        # Provide Excel download (xlsx)
+        try:
+            import io
+            excel_buffer = io.BytesIO()
+            pr_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+            excel_bytes = excel_buffer.getvalue()
+            st.download_button("Download Excel (.xlsx)", data=excel_bytes, file_name="patient_records.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        except Exception as e:
+            st.write("Excel export not available:", e)
+
     else:
         st.info("No patient records found yet (records saved locally to patient_records.csv).")
 
