@@ -27,9 +27,9 @@ PATIENT_RECORDS = "patient_records.csv"
 
 # --- GitHub model URLs (replace with yours if needed) ---
 RELEASE_ARTIFACTS = {
-    "hybrid_model.pkl": "https://github.com/adinarayanapantham/ML-Enhanced-DrugRecommender/releases/download/v1.0/hybrid_model.pkl",
-    "vectorizer.pkl": "https://github.com/adinarayanapantham/ML-Enhanced-DrugRecommender/releases/download/v1.0/vectorizer.pkl",
-    "encoder.pkl": "https://github.com/adinarayanapantham/ML-Enhanced-DrugRecommender/releases/download/v1.0/encoder.pkl"
+    "hybrid_model.pkl": "https://github.com/adinarayana93/ML-Enhanced-Drug-Recommender/releases/download/v1.0/hybrid_model.pkl",
+    "vectorizer.pkl": "https://github.com/adinarayana93/ML-Enhanced-Drug-Recommender/releases/download/v1.0/vectorizer.pkl",
+    "encoder.pkl": "https://github.com/adinarayana93/ML-Enhanced-Drug-Recommender/releases/download/v1.0/encoder.pkl"
 }
 
 # --- Ensure models exist (downloads if missing) ---
