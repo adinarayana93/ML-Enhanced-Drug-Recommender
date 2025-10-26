@@ -16,6 +16,10 @@ import requests
 import os
 from datetime import datetime
 import numpy as np
+import shap
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 # --- Paths ---
 MODEL_DIR = "saved_models"
@@ -73,6 +77,78 @@ st.markdown(
 tab1, tab2 = st.tabs(["Disease Prediction", "Patient Records"])
 
 # --- Helper Functions ---
+def compute_shap_for_input(input_text, vectorizer, model, encoder, top_n=10):
+    """
+    Compute approximate SHAP values for the input_text.
+    Approach:
+      - Vectorize input and get feature indices present
+      - For each base estimator in VotingClassifier that supports TreeExplainer (tree models),
+        compute SHAP values for that estimator (for this single input) and map them to tokens.
+      - Average SHAP values across estimators to get a consensus explanation.
+    Returns:
+      list of tuples: [(token, mean_abs_shap, raw_shap_value, count), ...] sorted by mean_abs_shap desc
+    """
+    # 1) vectorize
+    x_vec = vectorizer.transform([input_text])  # sparse (1, n_features)
+    try:
+        features = vectorizer.get_feature_names_out()
+    except:
+        features = list(vectorizer.vocabulary_.keys())
+
+    # 2) Find non-zero token indices in input
+    nz_indices = x_vec.nonzero()[1].tolist()
+    if not nz_indices:
+        return []
+
+    # 3) Accumulate shap values from tree estimators
+    shap_vals_accum = np.zeros(len(features), dtype=float)
+    shap_counts = 0
+
+    # VotingClassifier stores fitted estimators in .estimators_
+    if hasattr(model, "estimators_"):
+        for est in model.estimators_:
+            # Use TreeExplainer for tree-based models (RandomForest, GradientBoosting, XGBoost)
+            try:
+                explainer = shap.TreeExplainer(est)
+                # shap values shape: (1, n_features) for single input and single output; could be list for multiclass
+                shap_values = explainer.shap_values(x_vec)  # shape depends on model & multiclass
+                # For multiclass, shap_values is list of arrays (n_class x (1, n_features)); choose predicted class index
+                if isinstance(shap_values, list):
+                    # choose class that estimator predicts for this input
+                    est_pred = est.predict(x_vec)[0]
+                    # shap_values[est_pred] shape (1, n_features)
+                    sv = np.array(shap_values[est_pred])[0]
+                else:
+                    # shap_values is array (1, n_features)
+                    sv = np.array(shap_values)[0]
+                # accumulate
+                if sv.shape[0] == len(features):
+                    shap_vals_accum += sv
+                    shap_counts += 1
+            except Exception:
+                # Estimator does not support TreeExplainer or failed -> skip
+                continue
+
+    if shap_counts == 0:
+        return []
+
+    # 4) average shap values across estimators
+    shap_mean = shap_vals_accum / shap_counts  # length = n_features
+
+    # 5) build token list limited to tokens present in input, with abs value and raw
+    token_list = []
+    for idx in nz_indices:
+        token = features[idx]
+        raw = float(shap_mean[idx])
+        token_list.append((token, abs(raw), raw, int(x_vec[0, idx])))
+
+    # 6) sort by mean absolute shap desc and return top_n
+    token_list.sort(key=lambda x: x[1], reverse=True)
+    return token_list[:top_n]
+
+
+
+
 def combine_symptom_inputs(symptom_inputs):
     tokens = [s.strip() for s in symptom_inputs if isinstance(s, str) and s.strip() != ""]
     return " ".join(tokens)
@@ -200,6 +276,30 @@ with tab1:
             }
             save_patient_record(record)
             st.info("✅ Patient record saved locally.")
+    
+    
+    # SHAP explainability (single-sample)
+    shap_tokens = compute_shap_for_input(combined_input, vectorizer, model, encoder, top_n=10)
+    if shap_tokens:
+        st.markdown("#### SHAP explanation (approx.)")
+        # build a bar chart: tokens vs raw shap (signed) or abs
+        toks = [t for t, a, r, c in shap_tokens]
+        values = [r for t, a, r, c in shap_tokens]  # signed shap values
+        # plot horizontal bar chart
+        fig, ax = plt.subplots(figsize=(6, 3))
+        y_pos = np.arange(len(toks))
+        colors = ['green' if v >= 0 else 'red' for v in values]
+        ax.barh(y_pos, values, align='center', color=colors)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(toks)
+        ax.invert_yaxis()
+        ax.set_xlabel("Average SHAP value (signed)")
+        ax.set_title("Top contributing tokens (SHAP)")
+        st.pyplot(fig)
+    else:
+        st.info("SHAP explainability not available for this sample.")
+
+
 
 # --- Tab 2: Patient Records ---
 with tab2:
