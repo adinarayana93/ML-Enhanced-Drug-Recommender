@@ -63,7 +63,31 @@ model, vectorizer, encoder, merged_df = load_artifacts()
 
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="ML-Enhanced Drug Recommender", layout="wide")
-st.title("🧠 ML-Enhanced Drug Recommender — Annotated Version")
+
+# --- Custom CSS ---
+st.markdown("""
+    <style>
+    .main {
+        background-color: #111;
+        color: #eee;
+    }
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    h1, h2, h3, h4 {
+        color: #FFD65C;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+    <div style='background:#222;padding:18px;border-radius:8px;border:1px solid #444;text-align:center;'>
+        <h1 style='margin:0;color:#FFD65C;'>🧠 ML-Enhanced Drug Recommender</h1>
+        <p style='color:#ccc;'>AI-powered diagnosis support & personalized drug recommendations</p>
+    </div>
+""", unsafe_allow_html=True)
+
 
 st.markdown(
     """
@@ -74,9 +98,23 @@ st.markdown(
     """
 )
 
-tab1, tab2 = st.tabs(["Disease Prediction", "Patient Records"])
+tab1, tab2 = st.tabs(["💊 Disease Prediction", "📁 Patient Records"])
 
 # --- Helper Functions ---
+
+def get_all_symptoms(merged_df):
+    symptoms = set()
+    for _, row in merged_df.iterrows():
+        for i in range(1, 5):
+            sym = row.get(f"Symptom_{i}")
+            if isinstance(sym, str) and sym.strip():
+                symptoms.add(sym.strip())
+    return sorted(list(symptoms))
+
+
+ALL_SYMPTOMS = get_all_symptoms(merged_df)
+
+
 def compute_shap_for_input(input_text, vectorizer, model, encoder, top_n=10):
     """
     Compute approximate SHAP values for the input_text.
@@ -148,12 +186,17 @@ def compute_shap_for_input(input_text, vectorizer, model, encoder, top_n=10):
 
 
 
+def combine_symptom_inputs(s1, s2, s3, s4):
+    """
+    Combine selected symptoms into a single string for vectorization.
+    """
+    symptoms = [s1, s2, s3, s4]
+    # Remove blanks / None
+    symptoms = [s for s in symptoms if s and s.strip()]
+    return " ".join(symptoms)
 
-def combine_symptom_inputs(symptom_inputs):
-    tokens = [s.strip() for s in symptom_inputs if isinstance(s, str) and s.strip() != ""]
-    return " ".join(tokens)
 
-def get_top_tokens_for_input(input_text, vectorizer, model, encoder, top_n=10):
+def get_top_tokens_for_input(input_text, vectorizer, model, top_n=10):
     """Approximate token-level importance for interpretability."""
     vec = vectorizer.transform([input_text])
     features = vectorizer.get_feature_names_out()
@@ -210,25 +253,31 @@ def save_patient_record(record: dict, filename=PATIENT_RECORDS):
 
 # --- Tab 1: Prediction ---
 with tab1:
-    st.subheader("Patient Information & Symptoms")
+    st.subheader("Enter Patient Symptoms")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
+
     with col1:
-        name = st.text_input("Patient Name", "")
-        age = st.number_input("Age", min_value=0, max_value=120, value=30, step=1)
+        st.markdown('<div class = "section-title"> Patient Information</div>', unsafe_allow_html=True)
+        patient_name = st.text_input("Full Name", placeholder = "Enter patient's full name")
+        patient_age = st.number_input("Age", min_value=0, max_value=120, step=1, value=30)
+
+        st.markdown('<div class="section-title">🔍 Symptom Analysis</div>', unsafe_allow_html=True)
+        st.write("Select symptoms below for analysis:")
+
+        s1 = st.selectbox("Symptom 1", ALL_SYMPTOMS)
+        s2 = st.selectbox("Symptom 2", ALL_SYMPTOMS)
+
     with col2:
-        sex = st.selectbox("Sex", options=["Male", "Female", "Other"])
-    with col3:
-        contact = st.text_input("Contact (optional)", "")
+        s3 = st.selectbox("Symptom 3", ALL_SYMPTOMS)
+        s4 = st.selectbox("Symptom 4", ALL_SYMPTOMS)
 
-    st.markdown("### Symptoms (choose or type)")
-    s1 = st.text_input("Symptom 1", "")
-    s2 = st.text_input("Symptom 2", "")
-    s3 = st.text_input("Symptom 3", "")
-    s4 = st.text_input("Symptom 4", "")
 
-    combined_input = combine_symptom_inputs([s1, s2, s3, s4])
-    st.write("**Combined Symptoms Preview:**", combined_input[:300] if combined_input else "(empty)")
+    combined_input = combine_symptom_inputs(s1, s2, s3, s4)
+    pred_label = model.predict(vectorizer.transform([combined_input]))[0]
+    st.success(f"Predicted Disease: {pred_label}")
+    lookup_recommendations(pred_label, merged_df)
+
 
     if st.button("Predict Disease"):
         if not combined_input:
@@ -257,7 +306,7 @@ with tab1:
             else:
                 st.info("No recommendations found for this disease.")
 
-            token_info = get_top_tokens_for_input(combined_input, vectorizer, model, encoder, top_n=10)
+            token_info = get_top_tokens_for_input(combined_input, vectorizer, model, top_n=10)
             if token_info:
                 st.markdown("#### 🔍 Top Contributing Tokens (approx.)")
                 for token, score, count in token_info:
@@ -265,39 +314,92 @@ with tab1:
             else:
                 st.info("Token-level explainability not available for this model.")
 
-            record = {
-                "datetime": datetime.now().isoformat(),
-                "name": name.strip() or "Anonymous",
-                "age": int(age),
-                "sex": sex,
-                "contact": contact,
-                "combined_symptoms": combined_input,
-                "predicted_disease": predicted_disease
-            }
-            save_patient_record(record)
-            st.info("✅ Patient record saved locally.")
+            # record = {
+            #     "datetime": datetime.now().isoformat(),
+            #     "name": name.strip() or "Anonymous",
+            #     "age": int(age),
+            #     "sex": sex,
+            #     "contact": contact,
+            #     "combined_symptoms": combined_input,
+            #     "predicted_disease": predicted_disease
+            # }
+            # save_patient_record(record)
+            # st.info("✅ Patient record saved locally.")
     
     
     # SHAP explainability (single-sample)
+    # --- Explainability block (SHAP + fallback) ---
+    st.markdown("#### Model Explainability")
+
+    # 1️⃣ Try SHAP first
     shap_tokens = compute_shap_for_input(combined_input, vectorizer, model, encoder, top_n=10)
+
     if shap_tokens:
-        st.markdown("#### SHAP explanation (approx.)")
-        # build a bar chart: tokens vs raw shap (signed) or abs
+        # ✅ SHAP available
         toks = [t for t, a, r, c in shap_tokens]
-        values = [r for t, a, r, c in shap_tokens]  # signed shap values
-        # plot horizontal bar chart
+        vals = [r for t, a, r, c in shap_tokens]
+        colors = ["green" if v >= 0 else "red" for v in vals]
+
+        import matplotlib.pyplot as plt
+        import numpy as np
+
         fig, ax = plt.subplots(figsize=(6, 3))
         y_pos = np.arange(len(toks))
-        colors = ['green' if v >= 0 else 'red' for v in values]
-        ax.barh(y_pos, values, align='center', color=colors)
+        ax.barh(y_pos, vals, align="center", color=colors)
         ax.set_yticks(y_pos)
         ax.set_yticklabels(toks)
         ax.invert_yaxis()
         ax.set_xlabel("Average SHAP value (signed)")
         ax.set_title("Top contributing tokens (SHAP)")
         st.pyplot(fig)
+
     else:
-        st.info("SHAP explainability not available for this sample.")
+        st.warning("SHAP explanation not available for this sample — showing top tokens by model importance.")
+
+        fallback_tokens = get_top_tokens_for_input(combined_input, vectorizer, model, top_n=10)
+
+        if fallback_tokens:
+            # Extract data safely (ignore extra values)
+            toks = [item[0] for item in fallback_tokens]
+            vals = [item[1] for item in fallback_tokens]
+
+            import matplotlib.pyplot as plt
+            import numpy as np
+
+            fig, ax = plt.subplots(figsize=(6, 3))
+            y_pos = np.arange(len(toks))
+
+            # Normalize values to get pleasant transparency
+            max_val = max(vals) if max(vals) != 0 else 1
+            norm_vals = [v / max_val for v in vals]
+
+            # Dark theme bar coloring (cool-blue gradient)
+            colors = [(0.1, 0.6, 1.0, 0.3 + 0.7 * nv) for nv in norm_vals]
+
+            ax.barh(y_pos, vals, align="center", color=colors, edgecolor="white", linewidth=0.6)
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(toks, fontsize=10)
+            ax.invert_yaxis()
+            ax.set_xlabel("Token Importance", fontsize=11, color="#E5E5E5")
+            ax.set_title("Fallback Feature Contribution (Non-SHAP)", fontsize=12, color="#FFD65C")
+
+            # Dark mode background
+            ax.set_facecolor("#1E1E1E")
+            fig.patch.set_facecolor("#1E1E1E")
+
+            # Grid & axis styling
+            ax.grid(axis="x", linestyle="--", alpha=0.2)
+            ax.tick_params(colors="white")
+            ax.spines["bottom"].set_color("#BBBBBB")
+            ax.spines["left"].set_color("#BBBBBB")
+            ax.spines["right"].set_color("#BBBBBB")
+            ax.spines["top"].set_color("#BBBBBB")
+
+            st.pyplot(fig)
+
+        else:
+            st.info("No explanation available for this input.")
+
 
 
 
@@ -327,4 +429,19 @@ with tab2:
         st.info("No patient records found yet (records saved locally to patient_records.csv).")
 
 st.markdown("---")
-st.markdown("**Note:** This annotated app uses saved models and vectorizer. The model files are downloaded from GitHub if missing.")
+st.markdown("### 🧬 How it Works")
+st.markdown("""
+1. User selects up to 4 symptoms.
+2. ML model identifies likely diseases.
+3. System extracts drug recommendations from dataset.
+4. SHAP explains which symptoms influenced prediction.
+5. Patient can view related cases in the dataset.
+""")
+
+
+st.markdown("---")
+st.markdown(f"""
+**Records:** {len(merged_df)} |
+**Symptoms:** {len(ALL_SYMPTOMS)} |
+**Diseases:** {len(encoder.classes_)} 
+""")
