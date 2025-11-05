@@ -23,6 +23,18 @@ import io
 import plotly.express as px
 
 
+def admin_login():
+    st.sidebar.header("🔐 Admin Login")
+    username = st.sidebar.text_input("Username", placeholder="Enter username")
+    password = st.sidebar.text_input("Password", placeholder="Enter password", type="password")
+    if username == "admin" and password == "1234":
+        st.sidebar.success("Login successful ✅")
+        return True
+    elif username or password:
+        st.sidebar.error("Invalid credentials ❌")
+        return False
+    return False
+
 # ─────────────────────────────────────────────
 # Paths & artifacts
 # ─────────────────────────────────────────────
@@ -97,7 +109,9 @@ Select symptoms and click **Predict Disease**.
 The app predicts the most likely disease and recommends medication, diet, workout, and precautions.
 """)
 
-tab1, tab2, tab3 = st.tabs(["💊 Disease Prediction", "📁 Patient Records", "📊 Analytics Dashboard"])
+is_admin = admin_login()
+tab1, tab2, tab3, tab4 = st.tabs(["💊 Disease Prediction", "📁 Patient Records", "📊 Analytics Dashboard", "📝 Feedback"])
+
 
 
 # ─────────────────────────────────────────────
@@ -246,6 +260,30 @@ def generate_pdf_report(name, age, contact, symptoms, disease, rec):
     return fname
 
 
+def generate_disease_summary_pdf(disease_name, df):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(200, 10, f"Disease Summary Report: {disease_name}", ln=True, align="C")
+
+    subset = df[df["Predicted_Disease"].str.lower() == disease_name.lower()]
+    if subset.empty:
+        pdf.set_font("Arial", "", 12)
+        pdf.cell(200, 10, "No records found for this disease.", ln=True)
+    else:
+        pdf.set_font("Arial", "I", 12)
+        pdf.cell(200, 10, f"Total Cases: {len(subset)}", ln=True)
+        pdf.ln(10)
+        for i, row in subset.iterrows():
+            pdf.cell(200, 10, f"{row['Date']} — {row['Patient_Name']} ({row['Age']} yrs)", ln=True)
+
+    os.makedirs("reports", exist_ok=True)
+    fname = f"reports/{disease_name.replace(' ', '_')}_summary.pdf"
+    pdf.output(fname)
+    return fname
+
+
+
 # ─────────────────────────────────────────────
 # Tab 1: Prediction
 # ─────────────────────────────────────────────
@@ -321,105 +359,187 @@ with tab1:
 
 
 # ─────────────────────────────────────────────
-# Tab 2: Patient History
+# Tab 2: Patient Records (with admin login & summary PDF)
 # ─────────────────────────────────────────────
 with tab2:
     st.subheader("🧾 Patient History")
-    if os.path.exists(HISTORY_FILE):
-        df = pd.read_csv(HISTORY_FILE)
-        st.dataframe(df)
-        st.markdown("### 🔍 Filter Records")
-        search_name = st.text_input("Search by Patient Name")
-        search_disease = st.text_input("Search by Disease")
 
-        filtered_df = df.copy()
-        if search_name:
-            filtered_df = filtered_df[filtered_df["Patient_Name"].str.contains(search_name, case=False)]
-        if search_disease:
-            filtered_df = filtered_df[filtered_df["Predicted_Disease"].str.contains(search_disease, case=False)]
-
-        st.dataframe(filtered_df)
-
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("📄 Download CSV", data=csv, file_name="patient_records.csv", mime="text/csv")
-
-        excel_buf = io.BytesIO()
-        df.to_excel(excel_buf, index=False, engine="openpyxl")
-        st.download_button("📘 Download Excel", data=excel_buf.getvalue(),
-                           file_name="patient_records.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # Only admins can view full records
+    if not is_admin:
+        st.warning("Please log in as admin from the sidebar to view patient records.")
     else:
-        st.info("No patient history found yet.")
+        if os.path.exists(HISTORY_FILE):
+            df = pd.read_csv(HISTORY_FILE)
+
+            # --- Filter Section ---
+            st.markdown("### 🔍 Filter Records")
+            search_name = st.text_input("Search by Patient Name")
+            search_disease = st.text_input("Search by Disease")
+
+            filtered_df = df.copy()
+            if search_name:
+                filtered_df = filtered_df[
+                    filtered_df["Patient_Name"].str.contains(search_name, case=False, na=False)
+                ]
+            if search_disease:
+                filtered_df = filtered_df[
+                    filtered_df["Predicted_Disease"].str.contains(search_disease, case=False, na=False)
+                ]
+
+            st.dataframe(filtered_df)
+
+            # --- Download Buttons ---
+            csv = filtered_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📄 Download Filtered CSV",
+                data=csv,
+                file_name="patient_records.csv",
+                mime="text/csv",
+            )
+
+            # Excel download
+            try:
+                import io
+                excel_buf = io.BytesIO()
+                filtered_df.to_excel(excel_buf, index=False, engine="openpyxl")
+                st.download_button(
+                    "📘 Download Excel (.xlsx)",
+                    data=excel_buf.getvalue(),
+                    file_name="patient_records.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            except Exception as e:
+                st.write("Excel export not available:", e)
+
+            # --- Disease-wise Summary PDF ---
+            st.markdown("### 📄 Generate Disease Summary Report")
+            disease_names = sorted(df["Predicted_Disease"].dropna().unique().tolist())
+            if disease_names:
+                selected_disease = st.selectbox("Select Disease", disease_names)
+                if st.button("Generate Summary PDF"):
+                    summary_path = generate_disease_summary_pdf(selected_disease, df)
+                    with open(summary_path, "rb") as f:
+                        st.download_button(
+                            "⬇️ Download Summary PDF",
+                            f,
+                            file_name=os.path.basename(summary_path),
+                            mime="application/pdf",
+                        )
+            else:
+                st.info("No disease records available for summary report.")
+        else:
+            st.info("No patient records found yet (records saved locally to patient_history.csv).")
+
 
 
 # ─────────────────────────────────────────────
 # Tab 3: Analytics Dashboard
 # ─────────────────────────────────────────────
 with tab3:
-    st.subheader("📊 Analytics Dashboard")
-
-    if os.path.exists(HISTORY_FILE):
-        df = pd.read_csv(HISTORY_FILE)
-        if df.empty:
-            st.info("No records yet to display analytics.")
-        else:
-            st.markdown("### 🔹 Disease Prediction Frequency")
-            disease_count = df["Predicted_Disease"].value_counts().reset_index()
-            disease_count.columns = ["Disease", "Count"]
-            fig1 = px.bar(
-                disease_count,
-                x="Disease",
-                y="Count",
-                color="Count",
-                title="Most Commonly Predicted Diseases",
-                color_continuous_scale="tealgrn"
-            )
-            fig1.update_layout(xaxis_title="Disease", yaxis_title="Predictions")
-            st.plotly_chart(fig1, use_container_width=True)
-
-            st.markdown("### 🔹 Patient Age Distribution")
-            if "Age" in df.columns:
-                fig2 = px.histogram(
-                    df,
-                    x="Age",
-                    nbins=10,
-                    color_discrete_sequence=["#FFD65C"],
-                    title="Patient Age Distribution"
-                )
-                st.plotly_chart(fig2, use_container_width=True)
-
-            st.markdown("### 🔹 Symptom Frequency (Top 20)")
-            all_symptoms = []
-            for s in df["Symptoms"].dropna():
-                all_symptoms.extend([sym.strip() for sym in s.split(",")])
-            symptom_df = pd.DataFrame(all_symptoms, columns=["Symptom"])
-            top_symptoms = symptom_df["Symptom"].value_counts().reset_index().head(20)
-            top_symptoms.columns = ["Symptom", "Count"]
-            fig3 = px.bar(
-                top_symptoms,
-                x="Symptom",
-                y="Count",
-                color="Count",
-                color_continuous_scale="Bluered_r",
-                title="Most Commonly Reported Symptoms"
-            )
-            fig3.update_layout(xaxis_title="Symptom", yaxis_title="Frequency")
-            st.plotly_chart(fig3, use_container_width=True)
-
-            st.markdown("### 🔹 Records Over Time")
-            if "Date" in df.columns:
-                df["Date"] = pd.to_datetime(df["Date"])
-                time_series = df.groupby(df["Date"].dt.date).size().reset_index(name="Count")
-                fig4 = px.line(
-                    time_series,
-                    x="Date",
-                    y="Count",
-                    markers=True,
-                    title="Predictions Over Time"
-                )
-                st.plotly_chart(fig4, use_container_width=True)
+    if not is_admin:
+        st.warning("Please log in as admin from the sidebar to view records.")
     else:
-        st.info("No patient history found yet.")
+        st.subheader("📊 Analytics Dashboard")
+
+        if os.path.exists(HISTORY_FILE):
+            df = pd.read_csv(HISTORY_FILE)
+            if df.empty:
+                st.info("No records yet to display analytics.")
+            else:
+                st.markdown("### 🔹 Disease Prediction Frequency")
+                disease_count = df["Predicted_Disease"].value_counts().reset_index()
+                disease_count.columns = ["Disease", "Count"]
+                fig1 = px.bar(
+                    disease_count,
+                    x="Disease",
+                    y="Count",
+                    color="Count",
+                    title="Most Commonly Predicted Diseases",
+                    color_continuous_scale="tealgrn"
+                )
+                fig1.update_layout(xaxis_title="Disease", yaxis_title="Predictions")
+                st.plotly_chart(fig1, use_container_width=True)
+
+                st.markdown("### 🔹 Patient Age Distribution")
+                if "Age" in df.columns:
+                    fig2 = px.histogram(
+                        df,
+                        x="Age",
+                        nbins=10,
+                        color_discrete_sequence=["#FFD65C"],
+                        title="Patient Age Distribution"
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                st.markdown("### 🔹 Symptom Frequency (Top 20)")
+                all_symptoms = []
+                for s in df["Symptoms"].dropna():
+                    all_symptoms.extend([sym.strip() for sym in s.split(",")])
+                symptom_df = pd.DataFrame(all_symptoms, columns=["Symptom"])
+                top_symptoms = symptom_df["Symptom"].value_counts().reset_index().head(20)
+                top_symptoms.columns = ["Symptom", "Count"]
+                fig3 = px.bar(
+                    top_symptoms,
+                    x="Symptom",
+                    y="Count",
+                    color="Count",
+                    color_continuous_scale="Bluered_r",
+                    title="Most Commonly Reported Symptoms"
+                )
+                fig3.update_layout(xaxis_title="Symptom", yaxis_title="Frequency")
+                st.plotly_chart(fig3, use_container_width=True)
+
+                st.markdown("### 🔹 Records Over Time")
+                if "Date" in df.columns:
+                    df["Date"] = pd.to_datetime(df["Date"])
+                    time_series = df.groupby(df["Date"].dt.date).size().reset_index(name="Count")
+                    fig4 = px.line(
+                        time_series,
+                        x="Date",
+                        y="Count",
+                        markers=True,
+                        title="Predictions Over Time"
+                    )
+                    st.plotly_chart(fig4, use_container_width=True)
+        else:
+            st.info("No patient history found yet.")
+
+
+# ─────────────────────────────────────────────
+# Tab 4: Feedback
+# ─────────────────────────────────────────────
+with tab4:
+    st.subheader("📝 Share Your Feedback")
+
+    name = st.text_input("Your Name")
+    rating = st.slider("How satisfied are you with the system?", 1, 5, 4)
+    comment = st.text_area("Your Comments", placeholder="Type your feedback here...")
+    feedback_file = os.path.join("data", "feedback.csv")
+
+    if st.button("Submit Feedback"):
+        if name and comment:
+            record = {
+                "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Name": name,
+                "Rating": rating,
+                "Comment": comment
+            }
+            os.makedirs("data", exist_ok=True)
+            df = pd.DataFrame([record])
+            if os.path.exists(feedback_file):
+                df.to_csv(feedback_file, mode="a", header=False, index=False)
+            else:
+                df.to_csv(feedback_file, index=False)
+            st.success("Thank you for your feedback! 💬")
+        else:
+            st.warning("Please fill out all fields before submitting.")
+
+    if os.path.exists(feedback_file) and is_admin:
+        st.markdown("### View Collected Feedback")
+        fb_df = pd.read_csv(feedback_file)
+        st.dataframe(fb_df)
+
+
 
 
 # ─────────────────────────────────────────────
