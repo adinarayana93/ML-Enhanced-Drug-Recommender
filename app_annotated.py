@@ -20,6 +20,7 @@ import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 import io
+import plotly.express as px
 
 
 # ─────────────────────────────────────────────
@@ -96,7 +97,7 @@ Select symptoms and click **Predict Disease**.
 The app predicts the most likely disease and recommends medication, diet, workout, and precautions.
 """)
 
-tab1, tab2 = st.tabs(["💊 Disease Prediction", "📁 Patient Records"])
+tab1, tab2, tab3 = st.tabs(["💊 Disease Prediction", "📁 Patient Records", "📊 Analytics Dashboard"])
 
 
 # ─────────────────────────────────────────────
@@ -327,6 +328,18 @@ with tab2:
     if os.path.exists(HISTORY_FILE):
         df = pd.read_csv(HISTORY_FILE)
         st.dataframe(df)
+        st.markdown("### 🔍 Filter Records")
+        search_name = st.text_input("Search by Patient Name")
+        search_disease = st.text_input("Search by Disease")
+
+        filtered_df = df.copy()
+        if search_name:
+            filtered_df = filtered_df[filtered_df["Patient_Name"].str.contains(search_name, case=False)]
+        if search_disease:
+            filtered_df = filtered_df[filtered_df["Predicted_Disease"].str.contains(search_disease, case=False)]
+
+        st.dataframe(filtered_df)
+
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("📄 Download CSV", data=csv, file_name="patient_records.csv", mime="text/csv")
 
@@ -337,6 +350,77 @@ with tab2:
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.info("No patient history found yet.")
+
+
+# ─────────────────────────────────────────────
+# Tab 3: Analytics Dashboard
+# ─────────────────────────────────────────────
+with tab3:
+    st.subheader("📊 Analytics Dashboard")
+
+    if os.path.exists(HISTORY_FILE):
+        df = pd.read_csv(HISTORY_FILE)
+        if df.empty:
+            st.info("No records yet to display analytics.")
+        else:
+            st.markdown("### 🔹 Disease Prediction Frequency")
+            disease_count = df["Predicted_Disease"].value_counts().reset_index()
+            disease_count.columns = ["Disease", "Count"]
+            fig1 = px.bar(
+                disease_count,
+                x="Disease",
+                y="Count",
+                color="Count",
+                title="Most Commonly Predicted Diseases",
+                color_continuous_scale="tealgrn"
+            )
+            fig1.update_layout(xaxis_title="Disease", yaxis_title="Predictions")
+            st.plotly_chart(fig1, use_container_width=True)
+
+            st.markdown("### 🔹 Patient Age Distribution")
+            if "Age" in df.columns:
+                fig2 = px.histogram(
+                    df,
+                    x="Age",
+                    nbins=10,
+                    color_discrete_sequence=["#FFD65C"],
+                    title="Patient Age Distribution"
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+            st.markdown("### 🔹 Symptom Frequency (Top 20)")
+            all_symptoms = []
+            for s in df["Symptoms"].dropna():
+                all_symptoms.extend([sym.strip() for sym in s.split(",")])
+            symptom_df = pd.DataFrame(all_symptoms, columns=["Symptom"])
+            top_symptoms = symptom_df["Symptom"].value_counts().reset_index().head(20)
+            top_symptoms.columns = ["Symptom", "Count"]
+            fig3 = px.bar(
+                top_symptoms,
+                x="Symptom",
+                y="Count",
+                color="Count",
+                color_continuous_scale="Bluered_r",
+                title="Most Commonly Reported Symptoms"
+            )
+            fig3.update_layout(xaxis_title="Symptom", yaxis_title="Frequency")
+            st.plotly_chart(fig3, use_container_width=True)
+
+            st.markdown("### 🔹 Records Over Time")
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"])
+                time_series = df.groupby(df["Date"].dt.date).size().reset_index(name="Count")
+                fig4 = px.line(
+                    time_series,
+                    x="Date",
+                    y="Count",
+                    markers=True,
+                    title="Predictions Over Time"
+                )
+                st.plotly_chart(fig4, use_container_width=True)
+    else:
+        st.info("No patient history found yet.")
+
 
 # ─────────────────────────────────────────────
 # Footer
