@@ -114,12 +114,15 @@ st.markdown("""
     border-bottom: 2px solid #1e88e5;
 }
 .precaution-item {
-    background-color: #f0f4f8;
-    border-left: 3px solid #ff5722;
+    background-color: #e8f0ff;        /* Softer blue background */
+    color: #000000;                   /* Black text for visibility */
+    border-left: 3px solid #1e88e5;   /* Blue border to match theme */
     padding: 0.6rem;
     border-radius: 5px;
     margin-bottom: 0.5rem;
+    font-weight: 500;
 }
+
 .result-card {
     background-color: #fff;
     border-radius: 10px;
